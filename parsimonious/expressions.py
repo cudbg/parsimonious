@@ -8,6 +8,7 @@ These do the parsing.
 
 from inspect import getargspec
 import re
+import numpy as np #for vectorization instructions
 
 from six import integer_types, python_2_unicode_compatible
 from six.moves import range
@@ -109,18 +110,34 @@ class Expression(StrAndRepr):
     def __ne__(self, other):
         return not (self == other)
 
-    def parse(self, text, pos=0):
-        """Return a parse tree of ``text``.
+    # for checking the type of the texts
+    def is_list_of_strings(self, lst):
+            return bool(lst) and not isinstance(lst, basestring) and all(isinstance(elem, basestring) for elem in lst)
+
+    def parse(self, texts, pos=0):
+        """Return a parse tree of each ``text`` in list of ``texts``.
 
         Raise ``ParseError`` if the expression wasn't satisfied. Raise
         ``IncompleteParseError`` if the expression was satisfied but didn't
         consume the full string.
 
         """
-        node = self.match(text, pos=pos)
-        if node.end < len(text):
-            raise IncompleteParseError(text, node.end, self)
-        return node
+        # if we have a list of texts, vectorize it
+        # TODO: fix that this raises error if any one of the nodes fails
+        # instead just remove node?
+        if self.is_list_of_strings(texts):
+            texts = np.array(texts)
+            nodes = self.vec_match(texts)
+            # for node in nodes:
+                # if node.end < len(text):
+                    # raise IncompleteParseError(text, node.end, self)
+            return nodes
+        else:
+            # otherwise, proceed normally
+            node = self.match(texts, pos=pos)
+            if node.end < len(texts):
+                raise IncompleteParseError(texts, node.end, self)
+            return node
 
     def match(self, text, pos=0):
         """Return the parse tree matching this expression at the given
@@ -136,6 +153,9 @@ class Expression(StrAndRepr):
         if node is None:
             raise error
         return node
+
+    def vec_match(self, texts, pos = 0):
+        return np.vectorize(self.match)
 
     def match_core(self, text, pos, cache, error):
         """Internal guts of ``match()``
@@ -169,14 +189,16 @@ class Expression(StrAndRepr):
         # only the results of entire rules, not subexpressions (probably a
         # horrible idea for rules that need to backtrack internally a lot). (2)
         # Age stuff out of the cache somehow. LRU? (3) Cuts.
+
+        ## TODO : This needs to be a vector in the cache
         expr_id = id(self)
         node = cache.get((expr_id, pos), MARKER)  # TODO: Change to setdefault to prevent infinite recursion in left-recursive rules.
         if node is MARKER:
+            #cache[(expr_id,  pos)] = np.
             node = cache[(expr_id, pos)] = self._uncached_match(text,
                                                                 pos,
                                                                 cache,
                                                                 error)
-
         # Record progress for error reporting:
         if node is None and pos >= error.pos and (
                 self.name or getattr(error.expr, 'name', None) is None):
