@@ -127,10 +127,11 @@ class Expression(StrAndRepr):
         # instead just remove node?
         if self.is_list_of_strings(texts):
             texts = np.array(texts)
-            nodes = self.vec_match(texts)
-            # for node in nodes:
-                # if node.end < len(text):
-                    # raise IncompleteParseError(text, node.end, self)
+            vec_match = np.vectorize(self.match)
+            nodes = vec_match(texts)
+            for i, node in enumerate(nodes):
+                if node.end < len(texts[i]):
+                    raise IncompleteParseError(texts[i], node.end, self)
             return nodes
         else:
             # otherwise, proceed normally
@@ -154,8 +155,9 @@ class Expression(StrAndRepr):
             raise error
         return node
 
-    def vec_match(self, texts, pos = 0):
-        return np.vectorize(self.match)
+    # def vec_match(self, texts, pos=0):
+        # match_texts =  np.vectorize(self.match)
+        # return match_texts
 
     def match_core(self, text, pos, cache, error):
         """Internal guts of ``match()``
