@@ -330,10 +330,11 @@ class Sequence(Compound):
         new_pos = pos
         length_of_sequence = 0
         children = []
-        for m in self.members:
+        for rule_idx, m in enumerate(self.members):
             node = m.match_core(text, new_pos, cache, error)
             if node is None:
                 return None
+            node.rule_idx = rule_idx
             children.append(node)
             length = node.end - node.start
             new_pos += length
@@ -353,11 +354,11 @@ class OneOf(Compound):
 
     """
     def _uncached_match(self, text, pos, cache, error):
-        for m in self.members:
+        for rule_idx, m in enumerate(self.members):
             node = m.match_core(text, pos, cache, error)
             if node is not None:
                 # Wrap the succeeding child in a node representing the OneOf:
-                return Node(self, text, pos, node.end, children=[node])
+                return Node(self, text, pos, node.end, children=[node], rule_idx=rule_idx)
 
     def _as_rhs(self):
         return u'({0})'.format(u' / '.join(self._unicode_members()))

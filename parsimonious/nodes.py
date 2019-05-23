@@ -39,14 +39,17 @@ class Node(object):
                  'start', # The position in the text where that expr started matching
                  'end',   # The position after start where the expr first didn't
                           # match. [start:end] follow Python slice conventions.
-                 'children']  # List of child parse tree nodes
+                 'children',  # List of child parse tree nodes
+                 'rule_idx'
+                 ]
 
-    def __init__(self, expr, full_text, start, end, children=None):
+    def __init__(self, expr, full_text, start, end, children=None, rule_idx=0):
         self.expr = expr
         self.full_text = full_text
         self.start = start
         self.end = end
         self.children = children or []
+        self.rule_idx = rule_idx
 
     @property
     def expr_name(self):
