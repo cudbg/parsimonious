@@ -157,13 +157,13 @@ class Expression(StrAndRepr):
             for i, node in enumerate(nodes):
                 if node.end < len(texts[i]):
                     raise IncompleteParseError(texts[i], node.end, self)
-            return nodes
+            return nodes, cache
         else:
             # otherwise, proceed normally
             node = self.match(texts, 0, pos=pos)
             if node.end < len(texts):
                 raise IncompleteParseError(texts, node.end, self)
-            return node
+            return node, cache
 
     def match(self, text, tid, pos=0):
         """Return the parse tree matching this expression at the given
