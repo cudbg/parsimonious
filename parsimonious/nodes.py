@@ -195,7 +195,7 @@ class NodeVisitor(with_metaclass(RuleDecoratorMeta, object)):
     # TODO: If we need to optimize this, we can go back to putting subclasses
     # in charge of visiting children; they know when not to bother. Or we can
     # mark nodes as not descent-worthy in the grammar.
-    def visit(self, node):
+    def visit(self, maybe_tuple):
         """Walk a parse tree, transforming it into another representation.
 
         Recursively descend a parse tree, dispatching to the method named after
@@ -209,6 +209,15 @@ class NodeVisitor(with_metaclass(RuleDecoratorMeta, object)):
         methods.
 
         """
+        '''
+        Can access either a tuple of node, cache in the case of multiple queries, or just node.
+        TODO: ensure this is the case in a single query.
+        '''
+        if(type(maybe_tuple) == tuple):
+            node = maybe_tuple[0]
+            cache = maybe_tuple[1]
+        else:
+            node = maybe_tuple
         method = getattr(self, 'visit_' + node.expr_name, self.generic_visit)
 
         # Call that method, and show where in the tree it failed if it blows
