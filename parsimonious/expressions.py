@@ -223,7 +223,7 @@ class Expression(StrAndRepr):
         node = cache.get((expr_id, pos_id, str(path), tid), MARKER)
         if node is MARKER:
             path.append(expr_id)
-            node = self._uncached_match(text, pos, cache, path, tid, error)
+            node = self._uncached_match(text, pos, cache, path.copy(), tid, error)
             cache[(expr_id, pos_id, str(path), tid)] = node
         # Record progress for error reporting:
         if node is None and pos >= error.pos and (
