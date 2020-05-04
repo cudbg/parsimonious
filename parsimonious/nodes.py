@@ -13,6 +13,7 @@ from six import reraise, python_2_unicode_compatible, with_metaclass, \
     iteritems
 
 from parsimonious.exceptions import VisitationError, UndefinedLabel
+from parsimonious.node_metadata import NodeMetadata
 
 
 @python_2_unicode_compatible
@@ -36,17 +37,22 @@ class Node(object):
     # invalid ones and patch them up later, and there were other problems.
     __slots__ = ['expr',  # The expression that generated me
                  'full_text',  # The full text fed to the parser
-                 'start', # The position in the text where that expr started matching
-                 'end',   # The position after start where the expr first didn't
-                          # match. [start:end] follow Python slice conventions.
-                 'children']  # List of child parse tree nodes
+                 'opts'  # Map of each tid : [children]
+                 ]
+                 # 'start', # The position in the text where that expr started matching
+                 # 'end',   # The position after start where the expr first didn't
+                 #          # match. [start:end] follow Python slice conventions.
+                 # 'children']  # List of child parse tree nodes
 
-    def __init__(self, expr, full_text, start, end, children=None):
+    def __init__(self, expr, full_text, start, end, tid=0, children=None):
         self.expr = expr
         self.full_text = full_text
-        self.start = start
-        self.end = end
-        self.children = children or []
+        # self.start = start
+        # self.end = end
+        #self.children = children or []
+        first_opt = NodeMetadata(start, end, children)
+        self.opts = {}
+        self.opts[tid] = first_opt
 
     @property
     def expr_name(self):
@@ -60,12 +66,20 @@ class Node(object):
         :class:`PegVisitor` for an example.
 
         """
-        return iter(self.children)
+        all_children = []
+        for tid in self.opts.keys():
+            all_children.extend(self.opts[tid].children)
+        #return (self.opts[tid].children for tid in self.opts.keys())
+        return iter(all_children)
 
     @property
-    def text(self):
+    def symb(self):
+        return self.full_text[self.opts[0].start:self.opts[0].end]
+    
+    #@property
+    def text(self, tid=0):
         """Return the text this node matched."""
-        return self.full_text[self.start:self.end]
+        return self.full_text[self.opts[tid].start:self.opts[tid].end]
 
     # From here down is just stuff for testing and debugging.
 
@@ -79,14 +93,21 @@ class Node(object):
         # them all. Whoops.
         def indent(text):
             return '\n'.join(('    ' + line) for line in text.splitlines())
-        ret = [u'<%s%s matching "%s">%s' % (
-            self.__class__.__name__,
-            (' called "%s"' % self.expr_name) if self.expr_name else '',
-            self.text,
-            '  <-- *** We were here. ***' if error is self else '')]
-        for n in self:
-            ret.append(indent(n.prettily(error=error)))
-        return '\n'.join(ret)
+        def ret(tid):
+            #TODO: BUG : how to detail which tid for text?
+            # 'self.text(tid)' str not callable error
+            return [u'<%s%s matching "%s">%s' % (
+                self.__class__.__name__,
+                (' called "%s"' % self.expr_name) if self.expr_name else '',
+                self.text(tid),
+                '  <-- *** We were here. ***' if error is self else '')]
+        s = []
+        for tid in self.opts.keys():
+            sub_s = ret(tid)
+            for n in self:
+                sub_s.append(indent(n.prettily(error=error)))
+            s += sub_s
+        return '\n'.join(s)
 
     def __str__(self):
         """Return a compact, human-readable representation of me."""
@@ -112,14 +133,15 @@ class Node(object):
         # repr() of unicode flattens everything out to ASCII, so we don't need
         # to explicitly encode things afterward.
         ret = ["s = %r" % self.full_text] if top_level else []
-        ret.append("%s(%r, s, %s, %s%s)" % (
-            self.__class__.__name__,
-            self.expr,
-            self.start,
-            self.end,
-            (', children=[%s]' %
-             ', '.join([c.__repr__(top_level=False) for c in self.children]))
-            if self.children else ''))
+        for tid in self.opts.keys():
+            ret.append("%s(%r, s, %s, %s%s)" % (
+                self.__class__.__name__,
+                self.expr,
+                self.opts[tid].start,
+                self.opts[tid].end,
+                (', children=[%s]' %
+                ', '.join([c.__repr__(top_level=False) for c in self.opts[tid].children]))
+                if self.opts[tid].children else ''))
         return '\n'.join(ret)
 
 
@@ -223,7 +245,7 @@ class NodeVisitor(with_metaclass(RuleDecoratorMeta, object)):
         # Call that method, and show where in the tree it failed if it blows
         # up.
         try:
-            return method(node, [self.visit(n) for n in node])
+            return method(node, [self.visit(n) for n in node.opts[0].children])
         except (VisitationError, UndefinedLabel):
             # Don't catch and re-wrap already-wrapped exceptions.
             raise

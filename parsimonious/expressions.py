@@ -16,12 +16,13 @@ from six.moves import range
 
 from parsimonious.exceptions import ParseError, IncompleteParseError
 from parsimonious.nodes import Node, RegexNode
+from parsimonious.node_metadata import NodeMetadata
 from parsimonious.utils import StrAndRepr
 
 MARKER = object()
 
-global cache
-cache = {}
+# global cache
+# cache = {}
 
 
 def expression(callable, rule_name, grammar):
@@ -83,7 +84,7 @@ def expression(callable, rule_name, grammar):
             else:
                 # Node or None
                 return result
-            return Node(self, text, pos, end, children=children)
+            return Node(self, text, pos, end, tid, children=children)
 
         def _as_rhs(self):
             return '{custom function "%s"}' % callable.__name__
@@ -138,7 +139,7 @@ class Expression(StrAndRepr):
 
 
 
-    def parse(self, texts, pos=0):
+    def parse(self, texts, cache, pos=0):
         """Return a parse tree of each ``text`` in list of ``texts``.
 
         Raise ``ParseError`` if the expression wasn't satisfied. Raise
@@ -151,21 +152,25 @@ class Expression(StrAndRepr):
         # instead just remove node?
         if self.is_list_of_strings(texts):
             texts = np.array(texts)
-            tids = np.array(range(len(texts)))
-            vec_match = np.vectorize(self.match)
-            nodes = vec_match(texts, tids)
+            #tids = np.array(range(len(texts)))
+            #vec_match = np.vectorize(self.match)
+            nodes = []
+            for i in range(len(texts)):
+                res = self.match(texts[i], i, cache)
+                nodes.append(res)
+            #nodes = vec_match(texts, tids)
             for i, node in enumerate(nodes):
-                if node.end < len(texts[i]):
-                    raise IncompleteParseError(texts[i], node.end, self)
+                if node.opts[i].end < len(texts[i]):
+                    raise IncompleteParseError(texts[i], node.opts[i].end, self)
             return nodes, cache
         else:
             # otherwise, proceed normally
-            node = self.match(texts, 0, pos=pos)
-            if node.end < len(texts):
-                raise IncompleteParseError(texts, node.end, self)
+            node = self.match(texts, 0, cache, pos=pos)
+            if node.opts[0].end < len(texts):
+                raise IncompleteParseError(texts, node.opts[i].end, self)
             return node, cache
 
-    def match(self, text, tid, pos=0):
+    def match(self, text, tid, cache, pos=0):
         """Return the parse tree matching this expression at the given
         position, not necessarily extending all the way to the end of ``text``.
 
@@ -175,8 +180,7 @@ class Expression(StrAndRepr):
 
         """
         error = ParseError(text)
-        pos_id = 0
-        node = self.match_core(text, pos, cache, [], tid, pos_id, error)
+        node = self.match_core(text, pos, cache, [], tid, error)
         if node is None:
             raise error
         return node
@@ -185,7 +189,7 @@ class Expression(StrAndRepr):
         # match_texts =  np.vectorize(self.match)
         # return match_texts
 
-    def match_core(self, text, pos, cache, path, tid, pos_id, error):
+    def match_core(self, text, pos, cache, path, tid, error):
         """Internal guts of ``match()``
 
         This is appropriate to call only from custom rules or Expression
@@ -220,11 +224,28 @@ class Expression(StrAndRepr):
 
         ## TODO : This needs to be a vector in the cache
         expr_id = id(self)
-        node = cache.get((expr_id, pos_id, str(path), tid), MARKER)
+        pos_id = 0
+        node = cache.get((expr_id, pos_id, str(path)), MARKER)
+        # if already exists an entry for expr_id at parent path for given tid,
+        # increment pos_id
+
+        # if node is MARKER, just make a new cache entry
+        # if node exists and tid not in node.opts.keys, make a new cache entry
+        # if node exists and tid in node.opts.keys, increment pos_id
+        if node is not MARKER and tid in node.opts.keys():
+            pos_id += 1
+            node = cache.get((expr_id, pos_id, str(path)), MARKER)
+
         if node is MARKER:
             path.append(expr_id)
             node = self._uncached_match(text, pos, cache, path.copy(), tid, error)
-            cache[(expr_id, pos_id, str(path), tid)] = node
+            cache[(expr_id, pos_id, str(path))] = node
+
+        else:
+            path.append(expr_id)
+            subtree = self._uncached_match(text, pos, cache, path.copy(), tid, error)
+            node = self.add_branch(node, pos, subtree, tid, error)
+            cache[(expr_id, pos_id, str(path))] = node
         # Record progress for error reporting:
         if node is None and pos >= error.pos and (
                 self.name or getattr(error.expr, 'name', None) is None):
@@ -284,7 +305,12 @@ class Literal(Expression):
 
     def _uncached_match(self, text, pos, cache, path, tid, error):
         if text.startswith(self.literal, pos):
-            return Node(self, text, pos, pos + len(self.literal))
+            return Node(self, text, pos, pos + len(self.literal), tid)
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(pos, pos + len(self.literal), subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         # TODO: Get backslash escaping right.
@@ -299,7 +325,12 @@ class TokenMatcher(Literal):
     """
     def _uncached_match(self, token_list, pos, cache, path, tid, error):
         if token_list[pos].type == self.literal:
-            return Node(self, token_list, pos, pos + 1)
+            return Node(self, token_list, pos, pos + 1, tid)
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(pos, pos + 1, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
 
 class Regex(Expression):
@@ -328,9 +359,14 @@ class Regex(Expression):
         m = self.re.match(text, pos)
         if m is not None:
             span = m.span()
-            node = RegexNode(self, text, pos, pos + span[1] - span[0])
+            node = RegexNode(self, text, pos, pos + span[1] - span[0], tid)
             node.match = m  # TODO: A terrible idea for cache size?
             return node
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _regex_flags_from_bits(self, bits):
         """Return the textual equivalent of numerically encoded regex flags."""
@@ -378,18 +414,21 @@ class Sequence(Compound):
         new_pos = pos
         length_of_sequence = 0
         children = []
-        pos_id = 0
         for m in self.members:
-            node = m.match_core(text, new_pos, cache, path, tid, pos_id, error)
+            node = m.match_core(text, new_pos, cache, path, tid, error)
             if node is None:
                 return None
             children.append(node)
-            length = node.end - node.start
+            length = node.opts[tid].end - node.opts[tid].start
             new_pos += length
             length_of_sequence += length
-            pos_id += 1
         # Hooray! We got through all the members!
-        return Node(self, text, pos, pos + length_of_sequence, children)
+        return Node(self, text, pos, pos + length_of_sequence, tid, children)
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         return u'({0})'.format(u' '.join(self._unicode_members()))
@@ -403,13 +442,16 @@ class OneOf(Compound):
 
     """
     def _uncached_match(self, text, pos, cache, path, tid, error):
-        pos_id = 0
         for m in self.members:
-            node = m.match_core(text, pos, cache, path, tid, pos_id, error)
+            node = m.match_core(text, pos, cache, path, tid, error)
             if node is not None:
                 # Wrap the succeeding child in a node representing the OneOf:
-                return Node(self, text, pos, node.end, children=[node])
-            pos_id += 1
+                return Node(self, text, pos, node.opts[tid].end, tid, children=[node])
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         return u'({0})'.format(u' / '.join(self._unicode_members()))
@@ -424,10 +466,14 @@ class Lookahead(Compound):
     # went in. That doesn't bother me.
 
     def _uncached_match(self, text, pos, cache, path, tid, error):
-        pos_id = 0
-        node = self.members[0].match_core(text, pos, cache, path, tid, pos_id, error)
+        node = self.members[0].match_core(text, pos, cache, path, tid,  error)
         if node is not None:
-            return Node(self, text, pos, pos)
+            return Node(self, text, pos, pos, tid)
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         return u'&%s' % self._unicode_members()[0]
@@ -442,10 +488,14 @@ class Not(Compound):
     def _uncached_match(self, text, pos, cache, path, tid, error):
         # FWIW, the implementation in Parsing Techniques in Figure 15.29 does
         # not bother to cache NOTs directly.
-        pos_id = 0
-        node = self.members[0].match_core(text, pos, cache, path, tid, pos_id, error)
+        node = self.members[0].match_core(text, pos, cache, path, tid, error)
         if node is None:
-            return Node(self, text, pos, pos)
+            return Node(self, text, pos, pos, tid)
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         # TODO: Make sure this parenthesizes the member properly if it's an OR
@@ -463,10 +513,14 @@ class Optional(Compound):
 
     """
     def _uncached_match(self, text, pos, cache, path, tid, error):
-        pos_id = 0
-        node = self.members[0].match_core(text, pos, cache, path, tid, pos_id, error)
-        return (Node(self, text, pos, pos) if node is None else
-                Node(self, text, pos, node.end, children=[node]))
+        node = self.members[0].match_core(text, pos, cache, path, tid, error)
+        return (Node(self, text, pos, pos, tid) if node is None else
+                Node(self, text, pos, node.opts[tid].end, tid, children=[node]))
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         return u'%s?' % self._unicode_members()[0]
@@ -479,15 +533,18 @@ class ZeroOrMore(Compound):
     def _uncached_match(self, text, pos, cache, path, tid, error):
         new_pos = pos
         children = []
-        pos_id = 0
         while True:
-            node = self.members[0].match_core(text, new_pos, cache, path, tid, pos_id, error)
-            if node is None or not (node.end - node.start):
+            node = self.members[0].match_core(text, new_pos, cache, path, tid, error)
+            if node is None or not (node.opts[tid].end - node.opts[tid].start):
                 # Node was None or 0 length. 0 would otherwise loop infinitely.
-                return Node(self, text, pos, new_pos, children)
+                return Node(self, text, pos, new_pos, tid, children)
             children.append(node)
-            new_pos += node.end - node.start
-            pos_id += 1
+            new_pos += node.opts[tid].end - node.opts[tid].start
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
 
     def _as_rhs(self):
         return u'%s*' % self._unicode_members()[0]
@@ -512,19 +569,23 @@ class OneOrMore(Compound):
     def _uncached_match(self, text, pos, cache, path, tid, error):
         new_pos = pos
         children = []
-        pos_id = 0
         while True:
-            node = self.members[0].match_core(text, new_pos, cache, path, tid, pos_id, error)
+            node = self.members[0].match_core(text, new_pos, cache, path, tid, error)
             if node is None:
                 break
             children.append(node)
-            length = node.end - node.start
+            length = node.opts[tid].end - node.opts[tid].start
             if length == 0:  # Don't loop infinitely.
                 break
             new_pos += length
-            pos_id += 1
         if len(children) >= self.min:
-            return Node(self, text, pos, new_pos, children)
+            return Node(self, text, pos, new_pos, tid, children)
+
+    def add_branch(self, node, pos, subtree, tid, error):
+        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node.opts[tid] = node_opt
+        return node
+
 
     def _as_rhs(self):
         return u'%s+' % self._unicode_members()[0]

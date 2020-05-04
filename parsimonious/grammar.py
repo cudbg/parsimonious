@@ -112,7 +112,7 @@ class Grammar(OrderedDict):
 
         """
         self._check_default_rule()
-        return self.default_rule.parse(text, pos=pos)
+        return self.default_rule.parse(text, {}, pos=pos)
 
     def match(self, text, pos=0):
         """Parse some text with the :term:`default rule` but not necessarily
@@ -212,7 +212,7 @@ class BootstrappingGrammar(Grammar):
         # definition itself, I should never have to hard-code expressions for
         # those above.)
 
-        rule_tree = rules.parse(rule_syntax)
+        rule_tree = rules.parse(rule_syntax, {})
 
         # Turn the parse tree into a map of expressions:
         return RuleVisitor().visit(rule_tree)
@@ -308,7 +308,7 @@ class RuleVisitor(NodeVisitor):
 
     def visit_quantified(self, node, quantified):
         atom, quantifier = quantified
-        return self.quantifier_classes[quantifier.text](atom)
+        return self.quantifier_classes[quantifier.symb](atom)
 
     def visit_lookahead_term(self, node, lookahead_term):
         ampersand, term, _ = lookahead_term
@@ -346,7 +346,7 @@ class RuleVisitor(NodeVisitor):
     def visit_label(self, node, label):
         """Turn a label into a unicode string."""
         name, _ = label
-        return name.text
+        return name.symb
 
     def visit_reference(self, node, reference):
         """Stick a :class:`LazyReference` in the tree as a placeholder.
@@ -360,7 +360,7 @@ class RuleVisitor(NodeVisitor):
     def visit_regex(self, node, regex):
         """Return a ``Regex`` expression."""
         tilde, literal, flags, _ = regex
-        flags = flags.text.upper()
+        flags = flags.symb.upper()
         pattern = literal.literal  # Pull the string back out of the Literal
                                    # object.
         return Regex(pattern, ignore_case='I' in flags,
@@ -373,7 +373,7 @@ class RuleVisitor(NodeVisitor):
 
     def visit_spaceless_literal(self, spaceless_literal, visited_children):
         """Turn a string literal into a ``Literal`` that recognizes it."""
-        return Literal(evaluate_string(spaceless_literal.text))
+        return Literal(evaluate_string(spaceless_literal.symb))
 
     def visit_literal(self, node, literal):
         """Pick just the literal out of a literal-and-junk combo."""
@@ -467,7 +467,7 @@ class TokenRuleVisitor(RuleVisitor):
     def visit_spaceless_literal(self, spaceless_literal, visited_children):
         """Turn a string literal into a ``TokenMatcher`` that matches
         ``Token`` objects by their ``type`` attributes."""
-        return TokenMatcher(evaluate_string(spaceless_literal.text))
+        return TokenMatcher(evaluate_string(spaceless_literal.symb))
 
     def visit_regex(self, node, regex):
         tilde, literal, flags, _ = regex
