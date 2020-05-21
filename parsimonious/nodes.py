@@ -65,21 +65,42 @@ class Node(object):
         It can be very handy to unpack nodes in arg lists; see
         :class:`PegVisitor` for an example.
 
+        returns an iterator over lists of children
         """
+        #children_set = set()
+        #all_children = []
+        #for tid in self.opts.keys():
+        #    for i, child in self.opts[tid].children:
+        #        if (i, child.expr) not in children_set:
+        #            all_children.append(child)
+        #            children_set.add((i, child.expr))
+        ##return (self.opts[tid].children for tid in self.opts.keys())
+        #all_children = []
+        #for tid in self.opts.keys():
+            #all_children.append(self.opts[tid].children)
+        #return iter(all_children)
         all_children = []
         for tid in self.opts.keys():
             all_children.extend(self.opts[tid].children)
-        #return (self.opts[tid].children for tid in self.opts.keys())
-        return iter(all_children)
+        return all_children
+            
 
     @property
     def symb(self):
-        return self.full_text[self.opts[0].start:self.opts[0].end]
+        first_opt_node_metadata = self.opts[0]
+        return first_opt_node_metadata.full_text[first_opt_node_metadata.start:first_opt_node_metadata.end]
     
     #@property
     def text(self, tid=0):
         """Return the text this node matched."""
-        return self.full_text[self.opts[tid].start:self.opts[tid].end]
+        s = ""
+        for tid in self.opts.keys():
+            if tid > 0:
+                s += "/"
+            nm = self.opts[tid]
+            s += nm.full_text[nm.start:nm.end]
+        return s
+        #return self.full_text[self.opts[tid].start:self.opts[tid].end]
 
     # From here down is just stuff for testing and debugging.
 
@@ -94,19 +115,16 @@ class Node(object):
         def indent(text):
             return '\n'.join(('    ' + line) for line in text.splitlines())
         def ret(tid):
-            #TODO: BUG : how to detail which tid for text?
-            # 'self.text(tid)' str not callable error
             return [u'<%s%s matching "%s">%s' % (
                 self.__class__.__name__,
                 (' called "%s"' % self.expr_name) if self.expr_name else '',
                 self.text(tid),
                 '  <-- *** We were here. ***' if error is self else '')]
         s = []
-        for tid in self.opts.keys():
-            sub_s = ret(tid)
-            for n in self:
-                sub_s.append(indent(n.prettily(error=error)))
-            s += sub_s
+        sub_s = ret(0)
+        for child in self.opts[0].children:
+            sub_s.append(indent(child.prettily(error=error)))
+        s += sub_s
         return '\n'.join(s)
 
     def __str__(self):
