@@ -21,10 +21,6 @@ from parsimonious.utils import StrAndRepr
 
 MARKER = object()
 
-# global cache
-# cache = {}
-
-
 def expression(callable, rule_name, grammar):
     """Turn a plain callable into an Expression.
 
@@ -119,26 +115,6 @@ class Expression(StrAndRepr):
     def is_list_of_strings(self, lst):
             return bool(lst) and not isinstance(lst, str) and all(isinstance(elem, str) for elem in lst)
 
-    # def cache_get_entry(self, expr_id, path, tid):
-    #     tier = cache.get(expr_id, MARKER)
-    #     if tier != MARKER:
-    #         for p in path:
-    #             tier = tier.get(p, MARKER)
-    #             if tier == MARKER:
-    #                 break
-    #     if tier != MARKER:
-    #         tier = cache.get(tid, MARKER)
-    #     return tier
-
-    # def cache_set_entry(self, expr_id, path, tid, entry):
-    #     if expr_id not in cache.keys():
-    #         cache[expr_id] = {}
-    #     for p in path:
-    #         if p not in cache[expr_id][]
-    #         cache[expr_id]
-
-
-
     def parse(self, texts, cache, pos=0):
         """Return a parse tree of each ``text`` in list of ``texts``.
 
@@ -156,6 +132,7 @@ class Expression(StrAndRepr):
             #vec_match = np.vectorize(self.match)
             nodes = []
             for i in range(len(texts)):
+                print("TID: {}".format(i))
                 res = self.match(texts[i], i, cache)
                 nodes.append(res)
             #nodes = vec_match(texts, tids)
@@ -180,6 +157,7 @@ class Expression(StrAndRepr):
 
         """
         error = ParseError(text)
+        #print("TID: {}".format( tid))
         node = self.match_core(text, pos, cache, [], tid, error)
         if node is None:
             raise error
@@ -188,6 +166,76 @@ class Expression(StrAndRepr):
     # def vec_match(self, texts, pos=0):
         # match_texts =  np.vectorize(self.match)
         # return match_texts
+
+    def incremet_pos_id(self, node, tid, cache, hsh, pos_id, path):
+        '''
+        pos_id is used to differentiate between multiples of the same node type 
+        in a list of children
+
+        e.g.: Z -> x y x 
+        cache key for first x:  (hash(x), 0, parent_path)
+        cache key for y:        (hash(y), 0, parent_path)
+        cache key for second x: (hash(x), 1, parent_path)
+        '''
+        if node is not MARKER and tid in node.opts.keys():
+            pos_id += 1
+            node = cache.get((hsh, pos_id, str(path)), MARKER)
+        return node, pos_id
+    
+    def is_leaf_node(self):
+        if (len(self.identity_tuple)) == 2:
+            return True
+        return False
+    
+    def is_regex_leaf_node(self):
+        # Identity tuple [0] is always empty, tuple[1] contains either the literal or the regex - not null at leaf nodes
+        if len(self.identity_tuple) == 2:
+            # we have either a regex or literal node
+            if type(self.identity_tuple[1]) == re.Pattern:
+                return True
+        return False
+
+    def build_novel_node(self, hsh, text, pos, pos_id, cache, path, tid, error):
+        '''
+        Try building a new node after failing to find a matching node in the cache 
+        '''
+        prev_path = str(path)
+        path.append(hsh)
+
+        # build a new node for the first time
+        node = self._uncached_match(text, pos, cache, path.copy(), tid, error)
+        if node is not None:
+            # if we are at a regex-based leaf node TODO: add as node attribute
+            # adds another layer of specificity:
+            # cache key also based on actual text that matched regex
+            if self.is_regex_leaf_node():
+                hsh = hash((self.identity_tuple, node.text(tid)))
+                leaf_node = node
+                main_node = cache.get((hsh, pos_id, prev_path), MARKER)
+                if main_node is not MARKER:
+                    # there exists a leaf node already like this one in some other tid
+                    # so we need to add to node metadata
+                    node_opt = NodeMetadata(leaf_node.opts[tid].start, leaf_node.opts[tid].end, leaf_node.opts[tid].children)
+                    main_node.opts[tid] = node_opt
+                    node = main_node
+        cache[(hsh, pos_id, prev_path)] = node
+        return node, error
+
+    def build_new_node_opt(self, node, hsh, text, pos, pos_id, cache, path, tid, error):
+        '''
+        If we've found a matching node in the cache, append a new opt to it
+        '''
+        prev_path = str(path)
+        path.append(hsh)
+
+        # compute the subtree to get the child nodes
+        # super hot spot for needing optimization - could first try parses using other node_opts' children as a start?
+        subtree = self._uncached_match(text, pos, cache, path.copy(), tid, error)
+        if subtree is not None:
+            node_opt = NodeMetadata(subtree.opts[tid].start, subtree.opts[tid].end, subtree.opts[tid].children)
+            node.opts[tid] = node_opt
+        cache[(hsh, pos_id, prev_path)] = node
+        return node, error
 
     def match_core(self, text, pos, cache, path, tid, error):
         """Internal guts of ``match()``
@@ -223,29 +271,25 @@ class Expression(StrAndRepr):
         # Age stuff out of the cache somehow. LRU? (3) Cuts.
 
         ## TODO : This needs to be a vector in the cache
-        expr_id = id(self)
+
+        hsh = hash(self)
         pos_id = 0
-        node = cache.get((expr_id, pos_id, str(path)), MARKER)
-        # if already exists an entry for expr_id at parent path for given tid,
-        # increment pos_id
+        node = cache.get((hsh, pos_id, str(path)), MARKER)
+
+        # if node exists and tid in node.opts.keys (we have branched before), increment pos_id
+        if node is not MARKER and node is not None and tid in node.opts.keys():
+            node, pos_id = self.incremet_pos_id(node, tid, cache, hsh, pos_id, path)
 
         # if node is MARKER, just make a new cache entry
-        # if node exists and tid not in node.opts.keys, make a new cache entry
-        # if node exists and tid in node.opts.keys, increment pos_id
-        if node is not MARKER and tid in node.opts.keys():
-            pos_id += 1
-            node = cache.get((expr_id, pos_id, str(path)), MARKER)
-
         if node is MARKER:
-            path.append(expr_id)
-            node = self._uncached_match(text, pos, cache, path.copy(), tid, error)
-            cache[(expr_id, pos_id, str(path))] = node
+            node, error = self.build_novel_node(hsh, text, pos, pos_id, cache, path, tid, error)
 
+        # if node exists and tid not in node.opts.keys (we have branched before), add a new branch
         else:
-            path.append(expr_id)
-            subtree = self._uncached_match(text, pos, cache, path.copy(), tid, error)
-            node = self.add_branch(node, pos, subtree, tid, error)
-            cache[(expr_id, pos_id, str(path))] = node
+            if node is not None and self.is_regex_leaf_node():
+                hsh = hash((self.identity_tuple, node.text(tid)))
+            node, error = self.build_new_node_opt(node, hsh, text, pos, pos_id, cache, path, tid, error)
+
         # Record progress for error reporting:
         if node is None and pos >= error.pos and (
                 self.name or getattr(error.expr, 'name', None) is None):
