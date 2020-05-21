@@ -215,7 +215,7 @@ class Expression(StrAndRepr):
                 if main_node is not MARKER:
                     # there exists a leaf node already like this one in some other tid
                     # so we need to add to node metadata
-                    node_opt = NodeMetadata(leaf_node.opts[tid].start, leaf_node.opts[tid].end, leaf_node.opts[tid].children)
+                    node_opt = NodeMetadata(text, leaf_node.opts[tid].start, leaf_node.opts[tid].end, leaf_node.opts[tid].children)
                     main_node.opts[tid] = node_opt
                     node = main_node
         cache[(hsh, pos_id, prev_path)] = node
@@ -232,7 +232,7 @@ class Expression(StrAndRepr):
         # super hot spot for needing optimization - could first try parses using other node_opts' children as a start?
         subtree = self._uncached_match(text, pos, cache, path.copy(), tid, error)
         if subtree is not None:
-            node_opt = NodeMetadata(subtree.opts[tid].start, subtree.opts[tid].end, subtree.opts[tid].children)
+            node_opt = NodeMetadata(text, subtree.opts[tid].start, subtree.opts[tid].end, subtree.opts[tid].children)
             node.opts[tid] = node_opt
         cache[(hsh, pos_id, prev_path)] = node
         return node, error
@@ -352,7 +352,7 @@ class Literal(Expression):
             return Node(self, text, pos, pos + len(self.literal), tid)
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(pos, pos + len(self.literal), subtree.opts[0].children)
+        node_opt = NodeMetadata(text, pos, pos + len(self.literal), subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -372,7 +372,7 @@ class TokenMatcher(Literal):
             return Node(self, token_list, pos, pos + 1, tid)
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(pos, pos + 1, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, pos, pos + 1, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -408,7 +408,7 @@ class Regex(Expression):
             return node
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -470,7 +470,7 @@ class Sequence(Compound):
         return Node(self, text, pos, pos + length_of_sequence, tid, children)
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -493,7 +493,7 @@ class OneOf(Compound):
                 return Node(self, text, pos, node.opts[tid].end, tid, children=[node])
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -515,7 +515,7 @@ class Lookahead(Compound):
             return Node(self, text, pos, pos, tid)
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -537,7 +537,7 @@ class Not(Compound):
             return Node(self, text, pos, pos, tid)
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -562,7 +562,7 @@ class Optional(Compound):
                 Node(self, text, pos, node.opts[tid].end, tid, children=[node]))
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -586,7 +586,7 @@ class ZeroOrMore(Compound):
             new_pos += node.opts[tid].end - node.opts[tid].start
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 
@@ -626,7 +626,7 @@ class OneOrMore(Compound):
             return Node(self, text, pos, new_pos, tid, children)
 
     def add_branch(self, node, pos, subtree, tid, error):
-        node_opt = NodeMetadata(subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
+        node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
         node.opts[tid] = node_opt
         return node
 

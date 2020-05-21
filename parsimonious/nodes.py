@@ -36,7 +36,7 @@ class Node(object):
     # I tried making this subclass list, but it got ugly. I had to construct
     # invalid ones and patch them up later, and there were other problems.
     __slots__ = ['expr',  # The expression that generated me
-                 'full_text',  # The full text fed to the parser
+                 #_'full_text',  # The full text fed to the parser
                  'opts'  # Map of each tid : [children]
                  ]
                  # 'start', # The position in the text where that expr started matching
@@ -46,11 +46,11 @@ class Node(object):
 
     def __init__(self, expr, full_text, start, end, tid=0, children=None):
         self.expr = expr
-        self.full_text = full_text
+        # self.full_text = full_text
         # self.start = start
         # self.end = end
-        #self.children = children or []
-        first_opt = NodeMetadata(start, end, children)
+        # self.children = children or []
+        first_opt = NodeMetadata(full_text, start, end, children)
         self.opts = {}
         self.opts[tid] = first_opt
 
