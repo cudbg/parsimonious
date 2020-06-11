@@ -460,10 +460,11 @@ class Sequence(Compound):
         new_pos = pos
         length_of_sequence = 0
         children = []
-        for m in self.members:
+        for rule_idx, m in enumerate(self.members):
             node = m.match_core(text, new_pos, cache, path, tid, error)
             if node is None:
                 return None
+            node.rule_idx = rule_idx
             children.append(node)
             length = node.opts[tid].end - node.opts[tid].start
             new_pos += length
@@ -488,11 +489,11 @@ class OneOf(Compound):
 
     """
     def _uncached_match(self, text, pos, cache, path, tid, error):
-        for m in self.members:
+        for rule_idx, m in enumerate(self.members):
             node = m.match_core(text, pos, cache, path, tid, error)
             if node is not None:
                 # Wrap the succeeding child in a node representing the OneOf:
-                return Node(self, text, pos, node.opts[tid].end, tid, children=[node])
+                return Node(self, text, pos, node.opts[tid].end, tid, children=[node], rule_idx=rule_idx)
 
     def add_branch(self, node, pos, subtree, tid, error):
         node_opt = NodeMetadata(text, subtree.opts[0].start, subtree.opts[0].end, subtree.opts[0].children)
