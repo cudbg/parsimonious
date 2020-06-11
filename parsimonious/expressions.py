@@ -123,7 +123,6 @@ class Expression(StrAndRepr):
         consume the full string.
 
         """
-        # if we have a list of texts, vectorize it
         # TODO: fix that this raises error if any one of the nodes fails
         # instead just remove node?
         if self.is_list_of_strings(texts):
@@ -205,7 +204,7 @@ class Expression(StrAndRepr):
         # build a new node for the first time
         node = self._uncached_match(text, pos, cache, path.copy(), tid, error)
         if node is not None:
-            # if we are at a regex-based leaf node TODO: add as node attribute
+            # if we are at a regex-based leaf node
             # adds another layer of specificity:
             # cache key also based on actual text that matched regex
             if self.is_regex_leaf_node():
@@ -225,16 +224,19 @@ class Expression(StrAndRepr):
         '''
         If we've found a matching node in the cache, append a new opt to it
         '''
-        prev_path = str(path)
-        path.append(hsh)
+        if node is not None:
+            prev_path = str(path)
+            path.append(hsh)
 
-        # compute the subtree to get the child nodes
-        # super hot spot for needing optimization - could first try parses using other node_opts' children as a start?
-        subtree = self._uncached_match(text, pos, cache, path.copy(), tid, error)
-        if subtree is not None:
-            node_opt = NodeMetadata(text, subtree.opts[tid].start, subtree.opts[tid].end, subtree.opts[tid].children)
-            node.opts[tid] = node_opt
-        cache[(hsh, pos_id, prev_path)] = node
+            # compute the subtree to get the child nodes
+            # optimization - could first try parses using other node_opts' children as a start?
+
+            # may want to pass in {} empty cache, return newly filled in cache from uncached_match, and procedurally merge/update cache on this level of the stack.
+            subtree = self._uncached_match(text, pos, cache, path.copy(), tid, error)
+            if subtree is not None:
+                node_opt = NodeMetadata(text, subtree.opts[tid].start, subtree.opts[tid].end, subtree.opts[tid].children)
+                node.opts[tid] = node_opt
+            cache[(hsh, pos_id, prev_path)] = node
         return node, error
 
     def match_core(self, text, pos, cache, path, tid, error):
