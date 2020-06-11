@@ -13,6 +13,7 @@ from six import reraise, python_2_unicode_compatible, with_metaclass, \
     iteritems
 
 from parsimonious.exceptions import VisitationError, UndefinedLabel
+from parsimonious.node_metadata import NodeMetadata
 
 
 @python_2_unicode_compatible
@@ -35,20 +36,24 @@ class Node(object):
     # I tried making this subclass list, but it got ugly. I had to construct
     # invalid ones and patch them up later, and there were other problems.
     __slots__ = ['expr',  # The expression that generated me
-                 'full_text',  # The full text fed to the parser
-                 'start', # The position in the text where that expr started matching
-                 'end',   # The position after start where the expr first didn't
-                          # match. [start:end] follow Python slice conventions.
-                 'children',  # List of child parse tree nodes
+                 #_'full_text',  # The full text fed to the parser
+                 'opts'  # Map of each tid : [children]
                  'rule_idx'
                  ]
+                 # 'start', # The position in the text where that expr started matching
+                 # 'end',   # The position after start where the expr first didn't
+                 #          # match. [start:end] follow Python slice conventions.
+                 # 'children']  # List of child parse tree nodes
 
-    def __init__(self, expr, full_text, start, end, children=None, rule_idx=0):
+    def __init__(self, expr, full_text, start, end, tid=0, children=None, rule_idx=0):
         self.expr = expr
-        self.full_text = full_text
-        self.start = start
-        self.end = end
-        self.children = children or []
+        # self.full_text = full_text
+        # self.start = start
+        # self.end = end
+        # self.children = children or []
+        first_opt = NodeMetadata(full_text, start, end, children)
+        self.opts = {}
+        self.opts[tid] = first_opt
         self.rule_idx = rule_idx
 
     @property
@@ -62,13 +67,42 @@ class Node(object):
         It can be very handy to unpack nodes in arg lists; see
         :class:`PegVisitor` for an example.
 
+        returns an iterator over lists of children
         """
-        return iter(self.children)
+        #children_set = set()
+        #all_children = []
+        #for tid in self.opts.keys():
+        #    for i, child in self.opts[tid].children:
+        #        if (i, child.expr) not in children_set:
+        #            all_children.append(child)
+        #            children_set.add((i, child.expr))
+        ##return (self.opts[tid].children for tid in self.opts.keys())
+        #all_children = []
+        #for tid in self.opts.keys():
+            #all_children.append(self.opts[tid].children)
+        #return iter(all_children)
+        all_children = []
+        for tid in self.opts.keys():
+            all_children.extend(self.opts[tid].children)
+        return all_children
+            
 
     @property
-    def text(self):
+    def symb(self):
+        first_opt_node_metadata = self.opts[0]
+        return first_opt_node_metadata.full_text[first_opt_node_metadata.start:first_opt_node_metadata.end]
+    
+    #@property
+    def text(self, tid=0):
         """Return the text this node matched."""
-        return self.full_text[self.start:self.end]
+        s = ""
+        for tid in self.opts.keys():
+            if tid > 0:
+                s += "/"
+            nm = self.opts[tid]
+            s += nm.full_text[nm.start:nm.end]
+        return s
+        #return self.full_text[self.opts[tid].start:self.opts[tid].end]
 
     # From here down is just stuff for testing and debugging.
 
@@ -82,14 +116,18 @@ class Node(object):
         # them all. Whoops.
         def indent(text):
             return '\n'.join(('    ' + line) for line in text.splitlines())
-        ret = [u'<%s%s matching "%s">%s' % (
-            self.__class__.__name__,
-            (' called "%s"' % self.expr_name) if self.expr_name else '',
-            self.text,
-            '  <-- *** We were here. ***' if error is self else '')]
-        for n in self:
-            ret.append(indent(n.prettily(error=error)))
-        return '\n'.join(ret)
+        def ret(tid):
+            return [u'<%s%s matching "%s">%s' % (
+                self.__class__.__name__,
+                (' called "%s"' % self.expr_name) if self.expr_name else '',
+                self.text(tid),
+                '  <-- *** We were here. ***' if error is self else '')]
+        s = []
+        sub_s = ret(0)
+        for child in self.opts[0].children:
+            sub_s.append(indent(child.prettily(error=error)))
+        s += sub_s
+        return '\n'.join(s)
 
     def __str__(self):
         """Return a compact, human-readable representation of me."""
@@ -115,14 +153,15 @@ class Node(object):
         # repr() of unicode flattens everything out to ASCII, so we don't need
         # to explicitly encode things afterward.
         ret = ["s = %r" % self.full_text] if top_level else []
-        ret.append("%s(%r, s, %s, %s%s)" % (
-            self.__class__.__name__,
-            self.expr,
-            self.start,
-            self.end,
-            (', children=[%s]' %
-             ', '.join([c.__repr__(top_level=False) for c in self.children]))
-            if self.children else ''))
+        for tid in self.opts.keys():
+            ret.append("%s(%r, s, %s, %s%s)" % (
+                self.__class__.__name__,
+                self.expr,
+                self.opts[tid].start,
+                self.opts[tid].end,
+                (', children=[%s]' %
+                ', '.join([c.__repr__(top_level=False) for c in self.opts[tid].children]))
+                if self.opts[tid].children else ''))
         return '\n'.join(ret)
 
 
@@ -198,7 +237,7 @@ class NodeVisitor(with_metaclass(RuleDecoratorMeta, object)):
     # TODO: If we need to optimize this, we can go back to putting subclasses
     # in charge of visiting children; they know when not to bother. Or we can
     # mark nodes as not descent-worthy in the grammar.
-    def visit(self, node):
+    def visit(self, maybe_tuple):
         """Walk a parse tree, transforming it into another representation.
 
         Recursively descend a parse tree, dispatching to the method named after
@@ -212,12 +251,21 @@ class NodeVisitor(with_metaclass(RuleDecoratorMeta, object)):
         methods.
 
         """
+        '''
+        Can access either a tuple of node, cache in the case of multiple queries, or just node.
+        TODO: ensure this is the case in a single query.
+        '''
+        if(type(maybe_tuple) == tuple):
+            node = maybe_tuple[0]
+            cache = maybe_tuple[1]
+        else:
+            node = maybe_tuple
         method = getattr(self, 'visit_' + node.expr_name, self.generic_visit)
 
         # Call that method, and show where in the tree it failed if it blows
         # up.
         try:
-            return method(node, [self.visit(n) for n in node])
+            return method(node, [self.visit(n) for n in node.opts[0].children])
         except (VisitationError, UndefinedLabel):
             # Don't catch and re-wrap already-wrapped exceptions.
             raise
